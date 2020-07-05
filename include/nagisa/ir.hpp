@@ -28,7 +28,14 @@
 #include <nagisa/base.hpp>
 
 namespace nagisa::ir {
-    class TypeNode : public Base {};
+    class TypeNode : public Base {
+    public:
+      // scalar, vector, ...
+      virtual bool is_float()const{return false;}
+      virtual bool is_int()const{return false;}
+      virtual bool is_signed_int()const{return false;}
+      virtual bool is_aggregate()const{return true;}
+    };
 #define AKR_DECL_TYPENODE(Type)                                                                                        \
     std::string type_name() const { return #Type; }
     enum class PrimitiveTy {

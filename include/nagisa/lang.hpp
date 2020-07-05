@@ -275,41 +275,46 @@ namespace nagisa::lang {
 #define NGS_STRUCT_FIELD_PACK(r, data, f)                                                                              \
     var = ir::IRBuilder::get()->create_store_element(var, idx, f._get_var());                                          \
     idx++;
+
+#define NGS_TSTRUCT(Name, ...) NGS_STRUCT(Name, __VA_ARGS__)
+
 #define NGS_STRUCT(Name, ...)                                                                                          \
-    template <> struct Var<Name> : VarBase {                                                                           \
+    template<> struct Var<Name> : VarBase {                                                                                       \
         using element_t = Name;                                                                                        \
         using CStruct = Name;                                                                                          \
         using VarBase::VarBase;                                                                                        \
         BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))                              \
-        static ir::StructType get_type() {                                                                             \
-            auto name = typeid(Name).name();                                                                           \
-            if (auto ty = ir::get_struct_type(name)) {                                                                 \
-                return ty;                                                                                             \
-            }                                                                                                          \
-            auto st = std::make_shared<ir::StructTypeNode>();                                                          \
-            st->name = #Name;                                                                                          \
-            BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_REG_TYPE, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                \
-            ir::register_struct_type(name, st);                                                                        \
-            return st;                                                                                                 \
+        NGS_STRUCT_COMMON(Name, __VA_ARGS__)                                                                           \
+    };
+#define NGS_STRUCT_COMMON(Name, ...)                                                                                   \
+    static ir::StructType get_type() {                                                                                 \
+        auto name = typeid(Name).name();                                                                               \
+        if (auto ty = ir::get_struct_type(name)) {                                                                     \
+            return ty;                                                                                                 \
         }                                                                                                              \
-        void unpack() {                                                                                                \
-            int idx = 0;                                                                                               \
-            BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_UNPACK, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                  \
-        }                                                                                                              \
-        void pack() {                                                                                                  \
-            int idx = 0;                                                                                               \
-            if (!var) {                                                                                                \
-                var = ir::IRBuilder::get()->add_undef_struct(get_type());                                              \
-                var->type = get_type();                                                                                \
-            }                                                                                                          \
-            BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_PACK, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                    \
-        }                                                                                                              \
-        void _set_var(const ir::Var &v) {                                                                              \
-            var = v;                                                                                                   \
+        auto st = std::make_shared<ir::StructTypeNode>();                                                              \
+        st->name = #Name;                                                                                              \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_REG_TYPE, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                    \
+        ir::register_struct_type(name, st);                                                                            \
+        return st;                                                                                                     \
+    }                                                                                                                  \
+    void unpack() {                                                                                                    \
+        int idx = 0;                                                                                                   \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_UNPACK, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                      \
+    }                                                                                                                  \
+    void pack() {                                                                                                      \
+        int idx = 0;                                                                                                   \
+        if (!var) {                                                                                                    \
+            var = ir::IRBuilder::get()->add_undef_struct(get_type());                                                  \
             var->type = get_type();                                                                                    \
         }                                                                                                              \
-        explicit Var(mark_as_parameter) { var = ir::IRBuilder::get()->make_parameter(get_type()); }                    \
-    };
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_PACK, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                        \
+    }                                                                                                                  \
+    void _set_var(const ir::Var &v) {                                                                                  \
+        var = v;                                                                                                       \
+        var->type = get_type();                                                                                        \
+    }                                                                                                                  \
+    explicit Var(mark_as_parameter) { var = ir::IRBuilder::get()->make_parameter(get_type()); }
 
     using boolean = Var<bool>;
     using int32 = Var<int32_t>;

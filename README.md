@@ -1,4 +1,4 @@
-# Nagisa: C++ Expression JIT and EDSL Framework
+# Nagisa: C++ JIT and EDSL Framework
 
 ## Example
 

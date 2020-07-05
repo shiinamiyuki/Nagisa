@@ -25,14 +25,16 @@
 using namespace nagisa;
 using namespace lang;
 
-struct vec2 {
-    float x, y;
+template<typename T>
+struct tvec2 {
+    T x, y;
 };
 
-NGS_STRUCT(vec2, x, y)
+// template<typename T> NGS_TSTRUCT(tvec2<T>, x, y)
 
+NGS_TSTRUCT(tvec2<float>, x,y)
 int main() {
-    
+    using vec2 = tvec2<float>;
 
     // Function<float32(float32)> f = [](float32 x) -> float32 {
     //     auto sqr = [](float32 x) -> float32 { return select<float32>(x < 0, 0.0f, x * x); };

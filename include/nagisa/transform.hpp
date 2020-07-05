@@ -34,5 +34,5 @@ namespace nagisa::transform {
     /*  Does type infer if type is not provided
         Checks against provided type
     */
-    NAGISA_API std::unique_ptr<TransformPass> type_infer_pass();
+    NAGISA_API std::unique_ptr<TransformPass> type_inference_pass();
 } // namespace nagisa::transform
