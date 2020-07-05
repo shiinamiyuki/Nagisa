@@ -49,14 +49,14 @@ namespace nagisa::lang {
     struct VarBase {
         VarBase(const ir::Var v) : var(v) {}
         VarBase() = default;
-        void _set_var(const ir::Var &v) { var = v; }
-        const ir::Var &_get_var() { return var; }
+        void _nagisa_set_var(const ir::Var &v) { var = v; }
+        const ir::Var &_nagisa_get_var() { return var; }
 
       protected:
         ir::Var var;
     };
     template <typename T> struct Var : VarBase {
-        using element_t = T;
+        using cpp_element_t = T;
         using VarBase::VarBase;
         template <typename U> friend struct Var;
         template <typename U> Var(const Var<U> &rhs) { set(rhs); }
@@ -86,7 +86,7 @@ namespace nagisa::lang {
             }
             var->type = ir::get_type_from_native<T>();
         }
-        void _set_var(const ir::Var &v) {
+        void _nagisa_set_var(const ir::Var &v) {
             var = v;
             var->type = get_type();
         }
@@ -103,9 +103,9 @@ namespace nagisa::lang {
             Var<R> converted_lhs = *this, converted_rhs = rhs;
             Var<R> res;
             if constexpr (std::is_floating_point_v<R>) {
-                res._set_var(ir::IRBuilder::get()->create_fadd(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_fadd(converted_lhs.var, converted_rhs.var));
             } else {
-                res._set_var(ir::IRBuilder::get()->create_iadd(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_iadd(converted_lhs.var, converted_rhs.var));
             }
             return res;
         }
@@ -114,9 +114,9 @@ namespace nagisa::lang {
             Var<R> converted_lhs = *this, converted_rhs = rhs;
             Var<R> res;
             if constexpr (std::is_floating_point_v<R>) {
-                res._set_var(ir::IRBuilder::get()->create_fsub(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_fsub(converted_lhs.var, converted_rhs.var));
             } else {
-                res._set_var(ir::IRBuilder::get()->create_isub(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_isub(converted_lhs.var, converted_rhs.var));
             }
             return res;
         }
@@ -126,9 +126,9 @@ namespace nagisa::lang {
             Var<R> converted_lhs = *this, converted_rhs = rhs;
             Var<R> res;
             if constexpr (std::is_floating_point_v<R>) {
-                res._set_var(ir::IRBuilder::get()->create_fmul(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_fmul(converted_lhs.var, converted_rhs.var));
             } else {
-                res._set_var(ir::IRBuilder::get()->create_imul(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_imul(converted_lhs.var, converted_rhs.var));
             }
             return res;
         }
@@ -138,9 +138,9 @@ namespace nagisa::lang {
             Var<R> converted_lhs = *this, converted_rhs = rhs;
             Var<R> res;
             if constexpr (std::is_floating_point_v<R>) {
-                res._set_var(ir::IRBuilder::get()->create_fdiv(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_fdiv(converted_lhs.var, converted_rhs.var));
             } else {
-                res._set_var(ir::IRBuilder::get()->create_idiv(converted_lhs.var, converted_rhs.var));
+                res._nagisa_set_var(ir::IRBuilder::get()->create_idiv(converted_lhs.var, converted_rhs.var));
             }
             return res;
         }
@@ -149,7 +149,7 @@ namespace nagisa::lang {
             using R = decltype(std::declval<T>() % std::declval<U>());
             Var<R> converted_lhs = *this, converted_rhs = rhs;
             Var<R> res;
-            res._set_var(ir::IRBuilder::get()->create_imod(converted_lhs.var, converted_rhs.var));
+            res._nagisa_set_var(ir::IRBuilder::get()->create_imod(converted_lhs.var, converted_rhs.var));
             return res;
         }
         template <typename U> auto shl(const Var<U> &rhs) const {
@@ -157,7 +157,7 @@ namespace nagisa::lang {
             using R = decltype(std::declval<T>() << std::declval<U>());
             Var<R> converted_lhs = *this, converted_rhs = rhs;
             Var<R> res;
-            res._set_var(ir::IRBuilder::get()->create_shl(converted_lhs.var, converted_rhs.var));
+            res._nagisa_set_var(ir::IRBuilder::get()->create_shl(converted_lhs.var, converted_rhs.var));
             return res;
         }
         template <typename U> auto shr(const Var<U> &rhs) const {
@@ -165,7 +165,7 @@ namespace nagisa::lang {
             using R = decltype(std::declval<T>() >> std::declval<U>());
             Var<R> converted_lhs = *this, converted_rhs = rhs;
             Var<R> res;
-            res._set_var(ir::IRBuilder::get()->create_shr(converted_lhs.var, converted_rhs.var));
+            res._nagisa_set_var(ir::IRBuilder::get()->create_shr(converted_lhs.var, converted_rhs.var));
             return res;
         }
 #define NGS_DEF_CMP_OPERATOR(op, name)                                                                                 \
@@ -174,9 +174,9 @@ namespace nagisa::lang {
         Var<R> converted_lhs = *this, converted_rhs = rhs;                                                             \
         Var<bool> res;                                                                                                 \
         if constexpr (std::is_floating_point_v<R>) {                                                                   \
-            res._set_var(ir::IRBuilder::get()->create_f##name(converted_lhs.var, converted_rhs.var));                  \
+            res._nagisa_set_var(ir::IRBuilder::get()->create_f##name(converted_lhs.var, converted_rhs.var));           \
         } else {                                                                                                       \
-            res._set_var(ir::IRBuilder::get()->create_i##name(converted_lhs.var, converted_rhs.var));                  \
+            res._nagisa_set_var(ir::IRBuilder::get()->create_i##name(converted_lhs.var, converted_rhs.var));           \
         }                                                                                                              \
         return res;                                                                                                    \
     }                                                                                                                  \
@@ -219,17 +219,25 @@ namespace nagisa::lang {
 
 
     */
+    template <typename T> struct has_var_trait : std::false_type {};
+
+    template <typename T> struct has_var_trait<Var<T>> : std::true_type {};
+
+    template <typename T> using get_element_t = typename T::cpp_element_t;
+
+    template <typename T> struct var_trait {};
     template <class Ret, class... Args> struct Function {};
-    template <class Ret, class... Args> struct Function<Var<Ret>(Var<Args>...)> {
-        using func_t = Var<Ret> (*)(Var<Args>...);
-        using native_func_t = Ret (*)(Args...);
+    template <class Ret, class... Args> struct Function<Ret(Args...)> {
+        using func_t = std::function<Ret(Args...)>;
+        using native_func_t = get_element_t<Ret> (*)(get_element_t<Args>...);
         Function(func_t func) {
             auto fb = std::make_shared<ir::FunctionBlock>();
-            auto args = std::make_tuple(Var<Args>(mark_as_parameter{})...);
+            auto args = std::make_tuple(Args(mark_as_parameter{})...);
             fb->parameters.resize(sizeof...(Args));
             std::apply(
                 [&](auto &&... args) {
-                    apply_w_index([&](auto &&arg, size_t idx) { fb->parameters[idx] = arg._get_var(); }, 0u, args...);
+                    apply_w_index([&](auto &&arg, size_t idx) { fb->parameters[idx] = arg._nagisa_get_var(); }, 0u,
+                                  args...);
                 },
                 args);
 
@@ -238,18 +246,18 @@ namespace nagisa::lang {
                 [&](auto &&... args) {
                     apply_w_index(
                         [&](auto &&arg, size_t idx) {
-                            if constexpr (std::is_aggregate_v<typename std::decay_t<decltype(arg)>::element_t>) {
-                                arg.unpack();
+                            if constexpr (std::is_aggregate_v<typename std::decay_t<decltype(arg)>::cpp_element_t>) {
+                                arg._nagisa_unpack();
                             }
                         },
                         0u, args...);
                 },
                 args);
             auto body = std::apply(func, args);
-            if constexpr (std::is_aggregate_v<decltype(body)::element_t>) {
-                body.pack();
+            if constexpr (std::is_aggregate_v<decltype(body)::cpp_element_t>) {
+                body._nagisa_pack();
             }
-            ir::IRBuilder::get()->create_ret(body._get_var());
+            ir::IRBuilder::get()->create_ret(body._nagisa_get_var());
             function = fb->get_func_node();
         }
         native_func_t compile(const std::shared_ptr<Backend> &backend) {
@@ -261,26 +269,37 @@ namespace nagisa::lang {
         ir::Function function;
     };
 
-    template <typename T, typename U = typename T::element_t>
+    template <typename T, typename U = typename T::cpp_element_t>
     Var<U> select(const Var<bool> &cond, const T &a, const T &b) {
-        return Var<U>(ir::IRBuilder::get()->create_select(cond._get_var(), Var<U>(a)._get_var(), Var<U>(b)._get_var()));
+        return Var<U>(ir::IRBuilder::get()->create_select(cond._nagisa_get_var(), Var<U>(a)._nagisa_get_var(),
+                                                          Var<U>(b)._nagisa_get_var()));
     }
     template <class T, class M> M get_member_type(M T::*);
 
 #define NGS_STRUCT_FIELD(r, data, Field)      Var<decltype(get_member_type(&CStruct::Field))> Field;
 #define NGS_STRUCT_FIELD_REG_TYPE(r, data, f) st->append(#f, decltype(f)::get_type());
-#define NGS_STRUCT_FIELD_UNPACK(r, data, f)                                                                            \
-    f._set_var(ir::IRBuilder::get()->create_get_element(var, idx));                                                    \
+#define NGS_STRUCT_FIELD_ASSIGN(r, data, f)   f = c_st.f;
+#define NGS_STRUCT_FIELD_ASSIGN2(r, data, f)  c_st.f = f;
+#define NGS_STRUCT_FIELD_TYPENAME(r, data, f) typename = decltype(get_member_type(&_T::f)), 
+#define NGS_STRUCT_FIELD__nagisa_unpack(r, data, f)                                                                    \
+    f._nagisa_set_var(ir::IRBuilder::get()->create_get_element(var, idx));                                             \
     idx++;
 #define NGS_STRUCT_FIELD_PACK(r, data, f)                                                                              \
-    var = ir::IRBuilder::get()->create_store_element(var, idx, f._get_var());                                          \
+    var = ir::IRBuilder::get()->create_store_element(var, idx, f._nagisa_get_var());                                   \
     idx++;
 
-#define NGS_TSTRUCT(Name, ...) NGS_STRUCT(Name, __VA_ARGS__)
+#define NGS_TSTRUCT(Name, ...)                                                                                         \
+    struct Var<Name> : VarBase {                                                                                       \
+        using cpp_element_t = Name;                                                                                    \
+        using CStruct = Name;                                                                                          \
+        using VarBase::VarBase;                                                                                        \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))                              \
+        NGS_STRUCT_COMMON(Name, __VA_ARGS__)                                                                           \
+    };
 
 #define NGS_STRUCT(Name, ...)                                                                                          \
-    template<> struct Var<Name> : VarBase {                                                                                       \
-        using element_t = Name;                                                                                        \
+    template <> struct Var<Name> : VarBase {                                                                           \
+        using cpp_element_t = Name;                                                                                    \
         using CStruct = Name;                                                                                          \
         using VarBase::VarBase;                                                                                        \
         BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))                              \
@@ -298,11 +317,11 @@ namespace nagisa::lang {
         ir::register_struct_type(name, st);                                                                            \
         return st;                                                                                                     \
     }                                                                                                                  \
-    void unpack() {                                                                                                    \
+    void _nagisa_unpack() {                                                                                            \
         int idx = 0;                                                                                                   \
-        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_UNPACK, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                      \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD__nagisa_unpack, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));              \
     }                                                                                                                  \
-    void pack() {                                                                                                      \
+    void _nagisa_pack() {                                                                                              \
         int idx = 0;                                                                                                   \
         if (!var) {                                                                                                    \
             var = ir::IRBuilder::get()->add_undef_struct(get_type());                                                  \
@@ -310,12 +329,31 @@ namespace nagisa::lang {
         }                                                                                                              \
         BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_PACK, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                        \
     }                                                                                                                  \
-    void _set_var(const ir::Var &v) {                                                                                  \
+    void _nagisa_set_var(const ir::Var &v) {                                                                           \
         var = v;                                                                                                       \
         var->type = get_type();                                                                                        \
     }                                                                                                                  \
-    explicit Var(mark_as_parameter) { var = ir::IRBuilder::get()->make_parameter(get_type()); }
-
+    explicit Var(mark_as_parameter) { var = ir::IRBuilder::get()->make_parameter(get_type()); }                        \
+    Var(const Name &c_st) {                                                                                            \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_ASSIGN, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                      \
+    }                                                                                                                  \
+    Var &operator=(const Name &c_st) {                                                                                 \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_ASSIGN, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                      \
+    }                                                                                                                  \
+    template <typename _T, BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_TYPENAME, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)) typename=void> \
+    Var(const _T &c_st) {                                                                                              \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_ASSIGN, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                      \
+    }                                                                                                                  \
+    template <typename _T, BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_TYPENAME, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)) typename=void> \
+    Var &operator=(const _T &c_st) {                                                                                   \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_ASSIGN, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                      \
+    }                                                                                                                  \
+    template <typename _T, BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_TYPENAME, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)) typename=void> \
+    operator _T() const {                                                                                              \
+        _T c_st;                                                                                                       \
+        BOOST_PP_SEQ_FOR_EACH(NGS_STRUCT_FIELD_ASSIGN2, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                     \
+        return c_st;                                                                                                   \
+    }
     using boolean = Var<bool>;
     using int32 = Var<int32_t>;
     using float32 = Var<float>;

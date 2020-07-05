@@ -28,11 +28,16 @@ using namespace lang;
 template<typename T>
 struct tvec2 {
     T x, y;
+    tvec2 operator+(const tvec2 & rhs)const{
+        return {x + rhs.x, y + rhs.y};
+    }
 };
 
 // template<typename T> NGS_TSTRUCT(tvec2<T>, x, y)
 
-NGS_TSTRUCT(tvec2<float>, x,y)
+template<typename T> NGS_TSTRUCT(tvec2<T>, x,y)
+
+// Var<C<Ts::cpp_element_t...>> -> C<Ts...>
 int main() {
     using vec2 = tvec2<float>;
 
@@ -41,7 +46,9 @@ int main() {
     //     return sqr(x) + 2.0f;
     // };
     Function<float32(Var<vec2>)> f = [](Var<vec2> p)->float32{
-        return p.x + p.y;
+        tvec2<float32> a = p;
+        a = a + a;
+        return a.x + a.y;
     };
     std::cout << debug::to_text(f.__get_func_node()) << std::endl;
     auto be = create_llvm_backend();
