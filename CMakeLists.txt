@@ -28,6 +28,7 @@ add_library(NagisaRT SHARED ${NAGISA_SRC})
 include_directories(include/)
 target_include_directories(NagisaRT PUBLIC external/magic_enum/include)
 target_include_directories(NagisaRT PUBLIC ${LLVM_INCLUDE_DIR})
+target_include_directories(NagisaRT PUBLIC external/boost)
 target_link_directories(NagisaRT PUBLIC ${LLVM_LIBRARY_DIRS})
 target_link_libraries(NagisaRT
         LLVMX86Disassembler

@@ -19,6 +19,9 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
+#include <iostream>
+
 #include <nagisa/platform.h>
 #include <nagisa/debug.h>
 #include <magic_enum.hpp>
@@ -28,9 +31,12 @@ namespace nagisa::debug {
     NAGISA_API std::string to_text(const ir::Node &node) {
         struct DumpVisitor {
             std::string out;
-            std::string dump_type(const Type & ty){
-                if(ty->isa<PrimitiveType>()){
+            std::string dump_type(const Type &ty) {
+                if (ty->isa<PrimitiveType>()) {
                     return std::string(magic_enum::enum_name(ty->cast<PrimitiveType>()->prim));
+                }
+                if (ty->isa<StructType>()) {
+                    return ty->cast<StructType>()->name;
                 }
                 return "unknown";
             }
@@ -76,15 +82,15 @@ namespace nagisa::debug {
                         }
                     }
                     emit(")");
-                } else if (node->isa<If>()) {
-                    auto if_ = node->cast<If>();
-                    emit(level, "if (");
+                } else if (node->isa<Select>()) {
+                    auto if_ = node->cast<Select>();
+                    emit("select(");
                     recurse(if_->cond(), level);
-                    emit("){\n");
+                    emit(", ");
                     recurse(if_->then(), level++);
-                    emit(level, "} else {\n");
+                    emit(", ");
                     recurse(if_->else_(), level++);
-                    emit(level, "}\n");
+                    emit(")");
                 } else if (node->isa<Let>()) {
                     auto let = node->cast<Let>();
                     emit(level, "let ");
@@ -94,11 +100,28 @@ namespace nagisa::debug {
                     emit(std::string(" : ").append(dump_type(let->var()->type)).append("\n"));
                     if (!let->body()->isa<Let>()) {
                         emit(level, "");
-
                     }
                     recurse(let->body(), level);
+                } else if (node->isa<UndefStruct>()) {
+                    emit(std::string("decl ").append(dump_type(node->type)));
+                } else if (node->isa<LoadField>()) {
+                    auto load = node->cast<LoadField>();
+                    emit("load field ");
+                    recurse(load->aggregate, level);
+                    emit(std::string(" ").append(std::to_string(load->idx)));
+                } else if (node->isa<StoreField>()) {
+                    auto store = node->cast<StoreField>();
+                    emit("store field ");
+                    recurse(store->aggregate, level);
+                    emit(std::string(" ").append(std::to_string(store->idx)));
+                    recurse(store->val, level);
                 } else {
-                    NAGISA_ASSERT(false);
+                    if (!node) {
+                        emit("NULL!");
+                    } else {
+                        std::cerr << "unknown node " << node->type_name() << std::endl;
+                        NAGISA_ASSERT(false);
+                    }
                 }
             }
         };

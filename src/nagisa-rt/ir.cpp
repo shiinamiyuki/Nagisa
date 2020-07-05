@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include <nagisa/ir.hpp>
-
+#include <unordered_map>
 namespace nagisa::ir {
     size_t generate_id() {
         static size_t i = 0;
@@ -44,5 +44,16 @@ namespace nagisa::ir {
         default:
             return nullptr;
         }
+    }
+
+    static std::unordered_map<std::string, StructType> map;
+    NAGISA_API StructType get_struct_type(const char * s){
+        if(map.count(s)){
+            return map.at(s);
+        }
+        return nullptr;
+    }
+    NAGISA_API void register_struct_type(const char * s, StructType t){
+        map[s] = t;
     }
 } // namespace nagisa::ir

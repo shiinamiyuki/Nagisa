@@ -22,18 +22,28 @@
 
 #include <nagisa/nagisa.h>
 #include <nagisa/debug.h>
+using namespace nagisa;
+using namespace lang;
+
+struct vec2 {
+    float x, y;
+};
+
+NGS_STRUCT(vec2, x, y)
 
 int main() {
-    using namespace nagisa;
-    using namespace lang;
+    
 
-    Function<float32(float32)> f = [](float32 x)->float32{
-         auto sqr = [](float32 x)->float32{
-            return x * x;
-        };
-        return sqr(x) + 2.0f;
+    // Function<float32(float32)> f = [](float32 x) -> float32 {
+    //     auto sqr = [](float32 x) -> float32 { return select<float32>(x < 0, 0.0f, x * x); };
+    //     return sqr(x) + 2.0f;
+    // };
+    Function<float32(Var<vec2>)> f = [](Var<vec2> p)->float32{
+        return p.x + p.y;
     };
     std::cout << debug::to_text(f.__get_func_node()) << std::endl;
-    auto fp = f.compile();
-    std::cout << fp(2.0f) << std::endl;
+    auto be = create_llvm_backend();
+    auto fp = f.compile(be);
+    vec2 p{1, 2};
+    std::cout << fp(p) << std::endl;
 }

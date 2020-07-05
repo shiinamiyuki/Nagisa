@@ -47,29 +47,46 @@ namespace nagisa::ir {
     using PrimitiveType = std::shared_ptr<PrimitiveTypeNode>;
     NAGISA_API PrimitiveType get_primitive_type(PrimitiveTy);
 
+    struct StructField {
+        std::string name;
+        Type type;
+        int index;
+    };
+    class StructTypeNode : public TypeNode {
+      public:
+        AKR_DECL_TYPENODE(StructTypeNode)
+        std::string name;
+        std::vector<StructField> fields;
+        void append(Type ty) { fields.emplace_back(StructField{"", ty, (int)fields.size()}); }
+        void append(std::string _name, Type ty) { fields.emplace_back(StructField{_name, ty, (int)fields.size()}); }
+    };
+    using StructType = std::shared_ptr<StructTypeNode>;
+    NAGISA_API StructType get_struct_type(const char *);
+    NAGISA_API void register_struct_type(const char *, StructType);
+
     NAGISA_API size_t generate_id();
     class NodeVisitor;
     class CallNode;
     class ConstantNode;
     class FunctionNode;
     class PrimitiveNode;
-    class IfNode;
+    class SelectNode;
     class LetNode;
     class VarNode;
-    class NodeVisitor {
-      public:
-        virtual void visit(CallNode &) {}
-        virtual void visit(ConstantNode &) {}
-        virtual void visit(FunctionNode &) {}
-        virtual void visit(PrimitiveNode &) {}
-        virtual void visit(LetNode &) {}
-        virtual void visit(IfNode &) {}
-        virtual void visit(VarNode &) {}
-    };
+    // class NodeVisitor {
+    //   public:
+    //     virtual void visit(CallNode &) {}
+    //     virtual void visit(ConstantNode &) {}
+    //     virtual void visit(FunctionNode &) {}
+    //     virtual void visit(PrimitiveNode &) {}
+    //     virtual void visit(LetNode &) {}
+    //     virtual void visit(SelectNode &) {}
+    //     virtual void visit(VarNode &) {}
+    // };
     class IRNode : public Base {
       public:
         Type type;
-        virtual void accept(NodeVisitor &) = 0;
+        // virtual void accept(NodeVisitor &) = 0;
     };
     class AtomicNode : public IRNode {};
     using Atomic = std::shared_ptr<AtomicNode>;
@@ -77,11 +94,12 @@ namespace nagisa::ir {
     using Var = std::shared_ptr<VarNode>;
     using Let = std::shared_ptr<LetNode>;
     using Call = std::shared_ptr<CallNode>;
+    using Select = std::shared_ptr<SelectNode>;
     using Function = std::shared_ptr<FunctionNode>;
     using Constant = std::shared_ptr<ConstantNode>;
 #define AKR_DECL_NODE(Type)                                                                                            \
-    std::string type_name() const { return #Type; }                                                                    \
-    void accept(NodeVisitor &vis) { vis.visit(*this); }
+    std::string type_name() const { return #Type; }
+    // void accept(NodeVisitor &vis) { vis.visit(*this); }
     // class Expr : public Node {};
     using ExprNode = IRNode;
     using Expr = std::shared_ptr<ExprNode>;
@@ -106,7 +124,7 @@ namespace nagisa::ir {
         // GMod,
         // GenericEnd,
         StoreField, // Struct StoreField(Struct st, int field_id, Var value)
-        LoadField, // Var LoadField(Struct st, int field_id)
+        LoadField,  // Var LoadField(Struct st, int field_id)
         INeg,
         IAdd,
         ISub,
@@ -119,15 +137,30 @@ namespace nagisa::ir {
         Or,
         Xor,
         Not,
+        ICMPLT,
+        ICMPLE,
+        ICMPGT,
+        ICMPGE,
+        ICMPEQ,
+        ICMPNE,
         FNeg,
         FAdd,
         FSub,
         FMul,
         FDiv,
+        FCMPLT,
+        FCMPLE,
+        FCMPGT,
+        FCMPGE,
+        FCMPEQ,
+        FCMPNE,
         ConvertSP2I,
         ConvertI2SP,
         ConvertDP2I,
         ConvertI2DP,
+        MatMul,
+        MatInverse,
+        MatTranspose,
     };
 
     class PrimitiveNode : public AtomicNode {
@@ -139,6 +172,24 @@ namespace nagisa::ir {
         AKR_DECL_NODE(PrimitiveNode)
     };
     using Primitive = std::shared_ptr<PrimitiveNode>;
+
+    class LoadFieldNode : public ExprNode {
+      public:
+        Atomic aggregate;
+        int idx;
+        AKR_DECL_NODE(LoadFieldNode)
+        LoadFieldNode(Atomic aggregate, int idx) : aggregate(aggregate), idx(idx) {}
+    };
+    using LoadField = std::shared_ptr<LoadFieldNode>;
+    class StoreFieldNode : public ExprNode {
+      public:
+        Atomic aggregate;
+        int idx;
+        Atomic val;
+        AKR_DECL_NODE(StoreFieldNode)
+        StoreFieldNode(Atomic aggregate, int idx, Atomic val) : aggregate(aggregate), idx(idx), val(val) {}
+    };
+    using StoreField = std::shared_ptr<StoreFieldNode>;
     // Anonymous Function Node
     class FunctionNode : public ExprNode {
         std::vector<Var> _parameters;
@@ -151,18 +202,17 @@ namespace nagisa::ir {
         auto body() const { return _body; }
         AKR_DECL_NODE(FunctionNode)
     };
-    class IfNode : public ExprNode {
+    class SelectNode : public ExprNode {
         Node _cond, _then, _else;
 
       public:
-        IfNode(Node _cond, Node _then, Node _else)
+        SelectNode(Node _cond, Node _then, Node _else)
             : _cond(std::move(_cond)), _then(std::move(_then)), _else(std::move(_else)) {}
-        AKR_DECL_NODE(IfNode)
+        AKR_DECL_NODE(SelectNode)
         const Node &cond() const { return _cond; }
         const Node &then() const { return _then; }
         const Node &else_() const { return _else; }
     };
-    using If = std::shared_ptr<IfNode>;
     class LetNode : public ExprNode {
         Var _var;
         Node _val, _body;
@@ -211,14 +261,18 @@ namespace nagisa::ir {
             return nullptr;
         }
     }
-
+    class UndefStructNode : public AtomicNode {
+      public:
+        AKR_DECL_NODE(UndefStructNode)
+        UndefStructNode(Type ty) { type = ty; }
+    };
+    using UndefStruct = std::shared_ptr<UndefStructNode>;
     class ConstantNode : public AtomicNode {
       public:
         AKR_DECL_NODE(ConstantNode)
         using Value = std::variant<int, float, double>;
-        template <typename T, typename = std::enable_if_t<is_value<T>::value>>
-        ConstantNode(const T &v) : _value(v) {
-          type = (get_type_from_native<T>());
+        template <typename T, typename = std::enable_if_t<is_value<T>::value>> ConstantNode(const T &v) : _value(v) {
+            type = (get_type_from_native<T>());
         }
         const Value &value() const { return _value; }
 
