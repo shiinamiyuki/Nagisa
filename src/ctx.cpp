@@ -25,7 +25,10 @@
 #include <list>
 #include <sstream>
 #include <iostream>
+#include <array>
+#include <map>
 #include <unordered_map>
+#include <unordered_set>
 namespace nagisa {
     template <size_t DEFAULT_BLOCK_SIZE = 262144ull>
     class MemoryArena {
@@ -134,8 +137,10 @@ namespace nagisa {
     };
     class Context {
       public:
+        size_t cur_var = -1;
         size_t cur_size = 1;
-        std::vector<Value> trace;
+        std::unordered_set<int> live;
+        std::unordered_map<size_t, Value> vars;
         std::vector<std::unique_ptr<DeviceBuffer>> buffers;
         MemoryArena<> arena;
     };
@@ -144,37 +149,53 @@ namespace nagisa {
     void nagisa_init() {
         ctx = new Context();
         ocl_ctx = new OCLContext();
-        nagisa_add_predefined();
     }
     void nagisa_destroy() {
         delete ocl_ctx;
         delete ctx;
     }
     void nagisa_set_var_size(int idx, size_t s) {
-        NGS_ASSERT(ctx->trace.at(idx).buf_idx == -1);
-        ctx->trace.at(idx).size = s;
+        NGS_ASSERT(ctx->vars.at(idx).buf_idx == -1);
+        ctx->vars.at(idx).size = s;
     }
     int nagisa_buffer_id(int idx) {
-        // NGS_ASSERT(ctx->trace.at(idx).buf_idx != -1);
-        return ctx->trace.at(idx).buf_idx;
+        // NGS_ASSERT(ctx->vars.at(idx).buf_idx != -1);
+        return ctx->vars.at(idx).buf_idx;
     }
-    void nagisa_inc_int(int idx) { ctx->trace.at(idx)._ref_int++; }
-    void nagisa_dec_int(int idx) { ctx->trace.at(idx)._ref_int--; }
-    void nagisa_inc_ext(int idx) { ctx->trace.at(idx)._ref_ext++; }
-    void nagisa_dec_ext(int idx) { ctx->trace.at(idx)._ref_ext--; }
-    int nagisa_ref_ext(int idx){
-        return ctx->trace.at(idx)._ref_ext;
+    void nagisa_inc_int(int idx) {
+        if (idx < (int)Predefined::Total)
+            return;
+        ctx->vars.at(idx)._ref_int++;
     }
+    void nagisa_dec_int(int idx) {
+        if (idx < (int)Predefined::Total)
+            return;
+        ctx->vars.at(idx)._ref_int--;
+    }
+    void nagisa_inc_ext(int idx) {
+        if (idx < (int)Predefined::Total)
+            return;
+        ctx->vars.at(idx)._ref_ext++;
+    }
+    void nagisa_dec_ext(int idx) {
+        if (idx < (int)Predefined::Total)
+            return;
+        ctx->vars.at(idx)._ref_ext--;
+        if (ctx->vars.at(idx)._ref_ext == 0) {
+            ctx->live.erase(idx);
+        }
+    }
+    int nagisa_ref_ext(int idx) { return ctx->vars.at(idx)._ref_ext; }
     void nagisa_add_predefined() {
-        auto &trace = ctx->trace;
-        NGS_ASSERT(trace.empty());
+        auto &vars = ctx->vars;
+        NGS_ASSERT(vars.empty());
         Value vs[(int)Predefined::Total];
         vs[(int)Predefined::ThreadIdx].idx = (int)Predefined::ThreadIdx;
         vs[(int)Predefined::ThreadIdx].type = Type::i32;
-        trace.resize((int)Predefined::Total);
         for (int i = 0; i < (int)Predefined::Total; i++) {
-            trace[i] = vs[i];
+            vars[i] = vs[i];
         }
+        ctx->cur_var = (int)Predefined::Total - 1;
     }
     class OCLBuffer : public DeviceBuffer {
         cl::Buffer buffer;
@@ -199,11 +220,16 @@ namespace nagisa {
     }
     void nagisa_free(DeviceBuffer *) {}
     int nagisa_trace_append(const Instruction &i, Type type) {
+        if (ctx->vars.empty()) {
+            nagisa_add_predefined();
+        }
+        ++ctx->cur_var;
         Value v;
         v.inst = i;
-        v.idx = (int)ctx->trace.size();
+        v.idx = (int)ctx->cur_var;
         v.type = type;
-        ctx->trace.emplace_back(v);
+        ctx->vars.emplace(ctx->cur_var, v);
+        ctx->live.insert(v.idx);
         return v.idx;
     }
     std::string type_to_str(Type type) {
@@ -219,13 +245,26 @@ namespace nagisa {
         std::cerr << "unknown type" << std::endl;
         std::abort();
     }
-    std::string nagisa_generate_kernel() {
-        // using namespace ir;
+    void scan_traces(std::unordered_set<int32_t> &visited, std::vector<int> &trace, int idx) {
+        if (visited.find(idx) != visited.end()) {
+            return;
+        }
+        visited.insert(idx);
+        std::array<int, 3> deps = ctx->vars.at(idx).inst.deps;
+        for (auto k : deps) {
+            if (k >= 0) {
+                scan_traces(visited, trace, k);
+            }
+        }
+        trace.push_back(idx);
+    }
+    std::string nagisa_generate_kernel_trace(std::unordered_map<int, std::string> &to_var,
+                                             const std::vector<int> &trace) {
         std::ostringstream out, kernel;
-        std::unordered_map<int, std::string> to_var;
 
         ctx->cur_size = 1;
-        for (auto &v : ctx->trace) {
+        for (auto idx : trace) {
+            auto &v = ctx->vars.at(idx);
             if (v.inst.op == Store) {
                 auto st = v.inst.store_inst;
                 // clang-format off
@@ -279,8 +318,7 @@ namespace nagisa {
         kernel << "}";
         return kernel.str();
     }
-    void nagisa_eval() {
-        auto kernel_src = nagisa_generate_kernel();
+    void nagisa_run_kernel(size_t size, const std::string &kernel_src) {
         std::cout << "kernel:\n" << kernel_src << std::endl;
         cl::Program::Sources sources;
         sources.push_back({kernel_src.c_str(), kernel_src.length()});
@@ -293,12 +331,26 @@ namespace nagisa {
         for (size_t i = 0; i < ctx->buffers.size(); i++) {
             kernel.setArg((cl_uint)i, ctx->buffers[i]->get());
         }
-        std::cout << "kernel launch with size: " << ctx->cur_size << std::endl;
-        ocl_ctx->queue.enqueueNDRangeKernel(kernel, cl::NDRange(0), cl::NDRange(ctx->cur_size));
+        std::cout << "kernel launch with size: " << size << std::endl;
+        ocl_ctx->queue.enqueueNDRangeKernel(kernel, cl::NDRange(0), cl::NDRange(size));
         ocl_ctx->queue.finish();
     }
+    void nagisa_eval() {
+        std::map<size_t, std::pair<std::unordered_set<int>, std::vector<int>>> traces;
+        for (auto idx : ctx->live) {
+            auto &rec = traces[ctx->vars.at(idx).size];
+            scan_traces(rec.first, rec.second, idx);
+        }
+        ctx->live.clear();
+        std::unordered_map<int, std::string> to_var;
+        for (auto it = traces.begin(); it != traces.end(); it++) {
+            auto &trace = it->second.second;
+            auto knl = nagisa_generate_kernel_trace(to_var, trace);
+            nagisa_run_kernel(ctx->cur_size, knl);
+        }
+    }
     void nagisa_copy_to_host(int idx, void *p) {
-        auto &v = ctx->trace.at(idx);
+        auto &v = ctx->vars.at(idx);
         NGS_ASSERT(v.size != 1);
         nagisa_eval();
 

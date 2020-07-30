@@ -26,6 +26,7 @@
 #include <vector>
 #include <algorithm>
 #include <optional>
+#include <array>
 #define NGS_ASSERT(expr)                                                                                               \
     do {                                                                                                               \
         if (!(expr)) {                                                                                                 \
@@ -86,11 +87,14 @@ namespace nagisa {
                 int mask;
             } store_inst;
         };
+        std::array<int, 3>  deps = {-1};
         static Instruction binary(Opcode op, int a, int b) {
             Instruction i;
             i.op = op;
             i.operand[0] = a;
             i.operand[1] = b;
+            i.deps[0] = a;
+            i.deps[1] = b;
             return i;
         }
         static Instruction const_int(int x) {
@@ -112,6 +116,9 @@ namespace nagisa {
             i.store_inst.idx = idx;
             i.store_inst.value = value;
             i.store_inst.mask = mask;
+            i.deps[0] = idx;
+            i.deps[1] = value;
+            i.deps[2] = mask;
             return i;
         }
     };
@@ -177,7 +184,7 @@ namespace nagisa {
       public:
         Index _index;
         enum from_index_tag {};
-        GPUArray(const Index &i, size_t sz, from_index_tag) : _index(i), _size(sz) {  }
+        GPUArray(const Index &i, size_t sz, from_index_tag) : _index(i), _size(sz) {}
 
         Type type = get_type<Value>();
 
@@ -211,9 +218,7 @@ namespace nagisa {
         GPUArray add_(const GPUArray &rhs) const {
             auto sz = check_size(rhs);
             auto a = from_index(nagisa_trace_append(Instruction::binary(FAdd, index(), rhs.index()), type), sz);
-            if (sz != 1) {
-                nagisa_set_var_size(a.index(), sz);
-            }
+            nagisa_set_var_size(a.index(), sz);
             return a;
         }
         static GPUArray range_(size_t count) {
