@@ -127,7 +127,10 @@ namespace nagisa {
         Instruction inst;
         Type type;
         int idx = 0;
+        int buf_idx = -1;
         size_t size = 1;
+        size_t _ref_int = 0;
+        size_t _ref_ext = 0;
     };
     class Context {
       public:
@@ -147,7 +150,18 @@ namespace nagisa {
         delete ocl_ctx;
         delete ctx;
     }
-    void nagisa_set_var_size(int idx, size_t s) { ctx->trace.at(idx).size = s; }
+    void nagisa_set_var_size(int idx, size_t s) {
+        NGS_ASSERT(ctx->trace.at(idx).buf_idx == -1);
+        ctx->trace.at(idx).size = s;
+    }
+    int nagisa_buffer_id(int idx) {
+        // NGS_ASSERT(ctx->trace.at(idx).buf_idx != -1);
+        return ctx->trace.at(idx).buf_idx;
+    }
+    void nagisa_inc_int(int idx) { ctx->trace.at(idx)._ref_int++; }
+    void nagisa_dec_int(int idx) { ctx->trace.at(idx)._ref_int--; }
+    void nagisa_inc_ext(int idx) { ctx->trace.at(idx)._ref_ext++; }
+    void nagisa_dec_ext(int idx) { ctx->trace.at(idx)._ref_ext--; }
     void nagisa_add_predefined() {
         auto &trace = ctx->trace;
         NGS_ASSERT(trace.empty());
@@ -172,9 +186,7 @@ namespace nagisa {
         void read(uint8_t *p, size_t bytes, size_t offset) {
             ocl_ctx->queue.enqueueReadBuffer(buffer, CL_TRUE, offset, bytes, p);
         }
-        void * get()override {
-            return buffer();
-        }
+        void *get() override { return buffer(); }
     };
     std::pair<DeviceBuffer *, int32_t> nagisa_alloc(size_t s, Type type) {
         auto buffer = std::make_unique<OCLBuffer>(type, s);
@@ -206,21 +218,11 @@ namespace nagisa {
     }
     std::string nagisa_generate_kernel() {
         // using namespace ir;
-        std::ostringstream out;
+        std::ostringstream out, kernel;
         std::unordered_map<int, std::string> to_var;
-        out << "__kernel void main(";
-        {
-            for (size_t i = 0; i < ctx->buffers.size(); i++) {
-                auto &buf = ctx->buffers[i];
-                out << "__global " << type_to_str(buf->type) << " * buffer" << i;
-                if (i != ctx->buffers.size() - 1) {
-                    out << ", ";
-                }
-            }
-            out << "){\n";
-        }
+
         ctx->cur_size = 1;
-        for (auto v : ctx->trace) {
+        for (auto &v : ctx->trace) {
             if (v.inst.op == Store) {
                 auto st = v.inst.store_inst;
                 // clang-format off
@@ -249,9 +251,30 @@ namespace nagisa {
                 }
             }
             out << ";\n";
+            if (v.size != 1) {
+                if (v.buf_idx == -1) {
+                    auto [_, buf_id] = nagisa_alloc(v.size * get_typesize(v.type), v.type);
+                    v.buf_idx = buf_id;
+                }
+                out << "buffer" << v.buf_idx << "["
+                    << "get_global_id(0)"
+                    << "] = " << to_var.at(v.idx) << ";\n";
+            }
         }
-        out << "}";
-        return out.str();
+        kernel << "__kernel void main(";
+        {
+            for (size_t i = 0; i < ctx->buffers.size(); i++) {
+                auto &buf = ctx->buffers[i];
+                kernel << "__global " << type_to_str(buf->type) << " * buffer" << i;
+                if (i != ctx->buffers.size() - 1) {
+                    kernel << ", ";
+                }
+            }
+            kernel << "){\n";
+        }
+        kernel << out.str();
+        kernel << "}";
+        return kernel.str();
     }
     void nagisa_eval() {
         auto kernel_src = nagisa_generate_kernel();
@@ -264,9 +287,20 @@ namespace nagisa {
             exit(1);
         }
         cl::Kernel kernel(program, "main");
-        for(size_t i = 0; i < ctx->buffers.size(); i++){
+        for (size_t i = 0; i < ctx->buffers.size(); i++) {
             kernel.setArg((cl_uint)i, ctx->buffers[i]->get());
         }
-        ocl_ctx->queue.enqueueNDRangeKernel(kernel, cl::NDRange(0),cl::NDRange(ctx->cur_size));
+        std::cout << "kernel launch with size: " << ctx->cur_size << std::endl;
+        ocl_ctx->queue.enqueueNDRangeKernel(kernel, cl::NDRange(0), cl::NDRange(ctx->cur_size));
+        ocl_ctx->queue.finish();
+    }
+    void nagisa_copy_to_host(int idx, void *p) {
+        auto &v = ctx->trace.at(idx);
+        NGS_ASSERT(v.size != 1);
+        nagisa_eval();
+
+        auto buf_id = v.buf_idx;
+        std::cout << "reading buffer" << buf_id << std::endl;
+        ctx->buffers[buf_id]->read((uint8_t *)p, get_typesize(v.type) * v.size, 0);
     }
 } // namespace nagisa

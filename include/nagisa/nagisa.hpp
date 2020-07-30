@@ -24,6 +24,8 @@
 #include <memory>
 #include <string_view>
 #include <vector>
+#include <algorithm>
+#include <optional>
 #define NGS_ASSERT(expr)                                                                                               \
     do {                                                                                                               \
         if (!(expr)) {                                                                                                 \
@@ -41,6 +43,12 @@ namespace nagisa {
     std::pair<DeviceBuffer *, int32_t> nagisa_alloc(size_t, Type);
     void nagisa_free(DeviceBuffer *);
     void nagisa_set_var_size(int idx, size_t);
+    void nagisa_inc_int(int idx);
+    void nagisa_dec_int(int idx);
+    void nagisa_inc_ext(int idx);
+    void nagisa_dec_ext(int idx);
+    int nagisa_buffer_id(int idx);
+    void nagisa_copy_to_host(int idx, void *);
 
     template <typename Value>
     constexpr Type get_type() {
@@ -53,6 +61,16 @@ namespace nagisa {
         }
     }
 
+    inline size_t get_typesize(Type type) {
+        switch (type) {
+        case Type::i32:
+        case Type::f32:
+            return 4;
+        case Type::boolean:
+            return 1;
+        }
+        NGS_ASSERT(false);
+    }
     enum Opcode { FAdd, FSub, FMul, FDiv, ConstantInt, ConstantFloat, Store };
     struct Instruction {
         Opcode op;
@@ -110,56 +128,48 @@ namespace nagisa {
         virtual void *get() = 0;
     };
 
-    template <typename Value>
-    class Buffer {
-        DeviceBuffer *impl;
-        std::vector<Value> _data;
-        using Index = int;
-        Index _index;
-        Buffer(const Buffer &) = delete;
-
-      public:
-        const Type type = get_type<Value>();
-        explicit Buffer(size_t count) : _data(count) {
-            auto p = nagisa_alloc(sizeof(Value) * count, type);
-            impl = p.first;
-            _index = p.second;
-        }
-        template <typename Iter>
-        Buffer(const Iter &begin, const Iter &end) : _data(begin, end) {}
-        Index index() const { return _index; }
-        void copy_to_device() { impl->write(_data.data(), _data.size() * sizeof(Value), 0); }
-        const std::vector<Value> &copy_to_host() {
-            impl->read((uint8_t *)_data.data(), _data.size() * sizeof(Value), 0);
-            return _data;
-        }
-        const std::vector<Value> &data() const { return _data; }
-    };
-
+    /*
+    A GPUArray holds an index to the SSA value used in backend
+    It also holds an buffer object represent the *actual* value of the array
+    */
     template <typename Value>
     class GPUArray {
         using Index = int32_t;
         Index _index;
         enum from_index_tag {};
-        GPUArray(const Index &i, from_index_tag) : _index(i) {}
+        GPUArray(const Index &i, size_t sz, from_index_tag) : _index(i), _size(sz) { nagisa_inc_ext(_index); }
+
         Type type = get_type<Value>();
+
         size_t _size = 1;
         // std::optional<Buffer<Value>> _buffer;
+        mutable std::vector<Value> _buffer;
+        mutable bool need_sync = false;
 
       public:
+        ~GPUArray() { nagisa_dec_ext(_index); }
         using Mask = GPUArray<bool>;
         Index index() const { return _index; }
         size_t size() const { return _size; }
-        GPUArray(const Value v = Value()) {
+        GPUArray(const Value v = Value(), size_t s = 1) : _size(s) {
             if constexpr (std::is_integral_v<Value>) {
                 _index = nagisa_trace_append(Instruction::const_int(v), type);
             } else {
                 _index = nagisa_trace_append(Instruction::const_float(v), type);
             }
         }
-        static GPUArray from_index(const Index &i) { return GPUArray(i, from_index_tag{}); }
+        static GPUArray from_index(const Index &i, size_t sz) { return GPUArray(i, sz, from_index_tag{}); }
+        size_t check_size(const GPUArray &rhs) const {
+            NGS_ASSERT((_size == 1 || rhs.size() == 1) || (_size == rhs.size()));
+            return std::max(_size, rhs._size);
+        }
         GPUArray add_(const GPUArray &rhs) const {
-            return from_index(nagisa_trace_append(Instruction::binary(FAdd, index(), rhs.index()), type));
+            auto sz = check_size(rhs);
+            auto a = from_index(nagisa_trace_append(Instruction::binary(FAdd, index(), rhs.index()), type), sz);
+            if (sz != 1) {
+                nagisa_set_var_size(a.index(), sz);
+            }
+            return a;
         }
         static GPUArray range_(size_t count) {
             GPUArray a;
@@ -172,12 +182,20 @@ namespace nagisa {
         template <typename I, typename M>
         static void store(const GPUArray &buffer, const I &idx, const M &mask, const GPUArray &value) {
             (void)nagisa_trace_append(
-                Instruction::store(buffer._buffer.value().index(), idx.index(), value.index(), mask.index()),
+                Instruction::store(nagisa_buffer_id(buffer.index()), idx.index(), value.index(), mask.index()),
                 Type::none);
+        }
+        void sync() const {
+            _buffer.resize(_size);
+            nagisa_copy_to_host(index(), _buffer.data());
+        }
+        const std::vector<Value> &data() const {
+            sync();
+            return _buffer;
         }
     };
     template <typename Value, typename Index, typename Mask>
-    void store(const Buffer<Value> &buffer, const Index &idx, const Mask &m, const GPUArray<Value> &v) {
+    void store(const GPUArray<Value> &buffer, const Index &idx, const Mask &m, const GPUArray<Value> &v) {
         GPUArray<Value>::store(buffer, idx, m, v);
     }
 
