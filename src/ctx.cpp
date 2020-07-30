@@ -162,6 +162,9 @@ namespace nagisa {
     void nagisa_dec_int(int idx) { ctx->trace.at(idx)._ref_int--; }
     void nagisa_inc_ext(int idx) { ctx->trace.at(idx)._ref_ext++; }
     void nagisa_dec_ext(int idx) { ctx->trace.at(idx)._ref_ext--; }
+    int nagisa_ref_ext(int idx){
+        return ctx->trace.at(idx)._ref_ext;
+    }
     void nagisa_add_predefined() {
         auto &trace = ctx->trace;
         NGS_ASSERT(trace.empty());

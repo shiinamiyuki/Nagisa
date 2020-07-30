@@ -49,6 +49,7 @@ namespace nagisa {
     void nagisa_dec_ext(int idx);
     int nagisa_buffer_id(int idx);
     void nagisa_copy_to_host(int idx, void *);
+    int nagisa_ref_ext(int idx);
 
     template <typename Value>
     constexpr Type get_type() {
@@ -130,7 +131,7 @@ namespace nagisa {
 
     struct Index {
         int32_t i = -1;
-        Index(int32_t i = -1) :i(i){
+        Index(int32_t i = -1) : i(i) {
             if (i >= 0) {
                 nagisa_inc_ext(i);
             }
@@ -140,7 +141,20 @@ namespace nagisa {
                 nagisa_inc_ext(i);
             }
         }
+        Index(Index &&rhs) : i(rhs.i) {}
+        Index &operator=(Index &&rhs) {
+            if (i >= 0) {
+                nagisa_dec_ext(i);
+            }
+            i = rhs.i;
+            return *this;
+        }
         Index &operator=(const Index &rhs) {
+            if (&rhs == this)
+                return *this;
+            if (i >= 0) {
+                nagisa_dec_ext(i);
+            }
             i = rhs.i;
             if (i >= 0) {
                 nagisa_inc_ext(i);
@@ -160,9 +174,10 @@ namespace nagisa {
     */
     template <typename Value>
     class GPUArray {
+      public:
         Index _index;
         enum from_index_tag {};
-        GPUArray(const Index &i, size_t sz, from_index_tag) : _index(i), _size(sz) { nagisa_inc_ext(_index); }
+        GPUArray(const Index &i, size_t sz, from_index_tag) : _index(i), _size(sz) {  }
 
         Type type = get_type<Value>();
 
@@ -173,7 +188,7 @@ namespace nagisa {
 
       public:
         using Mask = GPUArray<bool>;
-        Index index() const { return _index; }
+        const Index &index() const { return _index; }
         size_t size() const { return _size; }
         GPUArray(const Value v = Value(), size_t s = 1) : _size(s) {
             if constexpr (std::is_integral_v<Value>) {
@@ -182,7 +197,7 @@ namespace nagisa {
                 _index = nagisa_trace_append(Instruction::const_float(v), type);
             }
         }
-        GPUArray(const GPUArray &other) : _index(other._index), _size(other._size) { nagisa_inc_ext(_index); }
+        GPUArray(const GPUArray &other) : _index(other._index), _size(other._size) {}
         GPUArray &operator=(const GPUArray &other) {
             _index = (other._index);
             _size = (other._size);
