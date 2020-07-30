@@ -129,8 +129,8 @@ namespace nagisa {
         int idx = 0;
         int buf_idx = -1;
         size_t size = 1;
-        size_t _ref_int = 0;
-        size_t _ref_ext = 0;
+        int _ref_int = 0;
+        int _ref_ext = 0;
     };
     class Context {
       public:
@@ -251,7 +251,7 @@ namespace nagisa {
                 }
             }
             out << ";\n";
-            if (v.size != 1) {
+            if (v.size != 1 && v._ref_ext > 0) {
                 if (v.buf_idx == -1) {
                     auto [_, buf_id] = nagisa_alloc(v.size * get_typesize(v.type), v.type);
                     v.buf_idx = buf_id;

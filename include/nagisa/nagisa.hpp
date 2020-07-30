@@ -128,13 +128,38 @@ namespace nagisa {
         virtual void *get() = 0;
     };
 
+    struct Index {
+        int32_t i = -1;
+        Index(int32_t i = -1) :i(i){
+            if (i >= 0) {
+                nagisa_inc_ext(i);
+            }
+        }
+        Index(const Index &rhs) : i(rhs.i) {
+            if (i >= 0) {
+                nagisa_inc_ext(i);
+            }
+        }
+        Index &operator=(const Index &rhs) {
+            i = rhs.i;
+            if (i >= 0) {
+                nagisa_inc_ext(i);
+            }
+            return *this;
+        }
+        operator int() const { return i; }
+        ~Index() {
+            if (i >= 0) {
+                nagisa_dec_ext(i);
+            }
+        }
+    };
     /*
     A GPUArray holds an index to the SSA value used in backend
     It also holds an buffer object represent the *actual* value of the array
     */
     template <typename Value>
     class GPUArray {
-        using Index = int32_t;
         Index _index;
         enum from_index_tag {};
         GPUArray(const Index &i, size_t sz, from_index_tag) : _index(i), _size(sz) { nagisa_inc_ext(_index); }
@@ -147,7 +172,6 @@ namespace nagisa {
         mutable bool need_sync = false;
 
       public:
-        ~GPUArray() { nagisa_dec_ext(_index); }
         using Mask = GPUArray<bool>;
         Index index() const { return _index; }
         size_t size() const { return _size; }
@@ -157,6 +181,12 @@ namespace nagisa {
             } else {
                 _index = nagisa_trace_append(Instruction::const_float(v), type);
             }
+        }
+        GPUArray(const GPUArray &other) : _index(other._index), _size(other._size) { nagisa_inc_ext(_index); }
+        GPUArray &operator=(const GPUArray &other) {
+            _index = (other._index);
+            _size = (other._size);
+            return *this;
         }
         static GPUArray from_index(const Index &i, size_t sz) { return GPUArray(i, sz, from_index_tag{}); }
         size_t check_size(const GPUArray &rhs) const {

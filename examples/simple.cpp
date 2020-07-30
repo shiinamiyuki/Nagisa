@@ -5,8 +5,8 @@ int main() {
     using namespace nagisa;
     nagisa_init();
     GPUArray<float> a(2.0);
-    GPUArray<float> idx = range<float>(128);
-    a = a.add_(idx);
+    // GPUArray<float> idx = ;
+    a = a.add_(range<float>(128));
     // Buffer<float> out(128);
     // store(out, idx, Mask(true), a);
     std::vector<float> out = a.data();
