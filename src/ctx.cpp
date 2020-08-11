@@ -125,7 +125,7 @@ namespace nagisa {
             queue = cl::CommandQueue(context, device);
         }
     };
-    static OCLContext *ocl_ctx = nullptr;
+    static std::unique_ptr<OCLContext> ocl_ctx = nullptr;
     struct Value {
         Instruction inst;
         Type type;
@@ -134,25 +134,28 @@ namespace nagisa {
         size_t size = 1;
         int _ref_int = 0;
         int _ref_ext = 0;
+        int _last_sync_time = -1;
     };
     class Context {
       public:
+        int _time = 0;
         size_t cur_var = -1;
         size_t cur_size = 1;
         std::unordered_set<int> live;
         std::unordered_map<size_t, Value> vars;
-        std::vector<std::unique_ptr<DeviceBuffer>> buffers;
+        std::map<int, std::unique_ptr<DeviceBuffer>> buffers;
+        std::unordered_map<std::string, cl::Program> kernel_cache;
         MemoryArena<> arena;
     };
-    static Context *ctx = nullptr;
+    static std::unique_ptr<Context> ctx = nullptr;
     void nagisa_add_predefined();
     void nagisa_init() {
-        ctx = new Context();
-        ocl_ctx = new OCLContext();
+        ctx = std::make_unique<Context>();
+        ocl_ctx = std::make_unique<OCLContext>();
     }
     void nagisa_destroy() {
-        delete ocl_ctx;
-        delete ctx;
+        ocl_ctx = nullptr;
+        ctx = nullptr;
     }
     void nagisa_set_var_size(int idx, size_t s) {
         NGS_ASSERT(ctx->vars.at(idx).buf_idx == -1);
@@ -180,6 +183,7 @@ namespace nagisa {
     void nagisa_dec_ext(int idx) {
         if (idx < (int)Predefined::Total)
             return;
+        NGS_ASSERT(ctx->vars.at(idx)._ref_ext > 0);
         ctx->vars.at(idx)._ref_ext--;
         if (ctx->vars.at(idx)._ref_ext == 0) {
             ctx->live.erase(idx);
@@ -215,7 +219,7 @@ namespace nagisa {
     std::pair<DeviceBuffer *, int32_t> nagisa_alloc(size_t s, Type type) {
         auto buffer = std::make_unique<OCLBuffer>(type, s);
         auto p = buffer.get();
-        ctx->buffers.emplace_back(std::move(buffer));
+        ctx->buffers.emplace(ctx->buffers.size(), std::move(buffer));
         return {p, (int)ctx->buffers.size() - 1};
     }
     void nagisa_free(DeviceBuffer *) {}
@@ -233,14 +237,14 @@ namespace nagisa {
         return v.idx;
     }
     std::string type_to_str(Type type) {
-        if (type == Type::boolean) {
-            return "bool";
-        }
         if (type == Type::f32) {
             return "float";
         }
         if (type == Type::i32) {
             return "int";
+        }
+        if (type == Type::boolean) {
+            return "bool";
         }
         std::cerr << "unknown type" << std::endl;
         std::abort();
@@ -249,8 +253,13 @@ namespace nagisa {
         if (visited.find(idx) != visited.end()) {
             return;
         }
+        auto &v = ctx->vars.at(idx);
+        if (v.idx >= (int)Predefined::Total && v._last_sync_time != -1) {
+            // v is from last kernel launch
+            return;
+        }
         visited.insert(idx);
-        std::array<int, 3> deps = ctx->vars.at(idx).inst.deps;
+        std::array<int, 3> deps = v.inst.deps;
         for (auto k : deps) {
             if (k >= 0) {
                 scan_traces(visited, trace, k);
@@ -261,21 +270,31 @@ namespace nagisa {
     std::string nagisa_generate_kernel_trace(std::unordered_map<int, std::string> &to_var,
                                              const std::vector<int> &trace) {
         std::ostringstream out, kernel;
-
+        int _var_cnt = 0;
         ctx->cur_size = 1;
         for (auto idx : trace) {
             auto &v = ctx->vars.at(idx);
-            if (v.inst.op == Store) {
-                auto st = v.inst.store_inst;
-                // clang-format off
-                out << "if(" << to_var.at(st.mask) << "){" \
-                    << "buffer" << st.buffer_id \
-                    << "[" << to_var.at(st.idx) << "] = " << to_var.at(st.value) << ";}\n";
-                // clang-format on
-                continue;
+            // if (v.inst.op == Store) {
+            //     auto st = v.inst.store_inst;
+            //     // clang-format off
+            //     out << "if(" << to_var.at(st.mask) << "){" \
+            //         << "buffer" << st.buffer_id \
+            //         << "[" << to_var.at(st.idx) << "] = " << to_var.at(st.value) << ";}\n";
+            //     // clang-format on
+            //     continue;
+            // }
+            for (auto dep : v.inst.deps) {
+                if (dep >= (int)Predefined::Total) {
+                    auto &u = ctx->vars.at(dep);
+                    if (u._last_sync_time >= 0 && u._last_sync_time < ctx->_time && to_var.find(dep) == to_var.end()) {
+                        std::string var = std::string("v").append(std::to_string(_var_cnt++));
+                        to_var[dep] = var;
+                        out << type_to_str(u.type) << " " << var << " = buffer" << u.buf_idx << "[get_global_id(0)];\n";
+                    }
+                }
             }
             ctx->cur_size = std::max(ctx->cur_size, v.size);
-            std::string var = std::string("v").append(std::to_string(v.idx));
+            std::string var = std::string("v").append(std::to_string(_var_cnt++));
             out << type_to_str(v.type) << " " << var << " = ";
             to_var[v.idx] = var;
             if (v.idx < (int)Predefined::Total) {
@@ -290,6 +309,40 @@ namespace nagisa {
                     out << v.inst.fval;
                 } else if (op == FAdd) {
                     out << to_var.at(v.inst.operand[0]) << " + " << to_var.at(v.inst.operand[1]);
+                } else if (op == FSub) {
+                    out << to_var.at(v.inst.operand[0]) << " - " << to_var.at(v.inst.operand[1]);
+                } else if (op == FMul) {
+                    out << to_var.at(v.inst.operand[0]) << " * " << to_var.at(v.inst.operand[1]);
+                } else if (op == FDiv) {
+                    out << to_var.at(v.inst.operand[0]) << " / " << to_var.at(v.inst.operand[1]);
+                } else if (op == Mod) {
+                    out << to_var.at(v.inst.operand[0]) << " % " << to_var.at(v.inst.operand[1]);
+                } else if (op == CmpLt) {
+                    out << to_var.at(v.inst.operand[0]) << " < " << to_var.at(v.inst.operand[1]);
+                } else if (op == CmpLe) {
+                    out << to_var.at(v.inst.operand[0]) << " <= " << to_var.at(v.inst.operand[1]);
+                } else if (op == CmpGt) {
+                    out << to_var.at(v.inst.operand[0]) << " > " << to_var.at(v.inst.operand[1]);
+                } else if (op == CmpGe) {
+                    out << to_var.at(v.inst.operand[0]) << " >= " << to_var.at(v.inst.operand[1]);
+                } else if (op == CmpEq) {
+                    out << to_var.at(v.inst.operand[0]) << " == " << to_var.at(v.inst.operand[1]);
+                } else if (op == CmpNe) {
+                    out << to_var.at(v.inst.operand[0]) << " != " << to_var.at(v.inst.operand[1]);
+                } else if (op == Select) {
+                    out << to_var.at(v.inst.operand[0]) << " ? " << to_var.at(v.inst.operand[1]) << " :"
+                        << to_var.at(v.inst.operand[2]);
+                } else if (op == Load) {
+                    out << to_var.at(v.inst.operand[1]) << " ? " << to_var.at(v.inst.operand[0]) << "["
+                        << to_var.at(v.inst.operand[2]) << "] : 0";
+                } else if (op == Sin) {
+                    out << "sin(" << to_var.at(v.inst.operand[0]) << ")";
+                } else if (op == Cos) {
+                    out << "cos(" << to_var.at(v.inst.operand[0]) << ")";
+                } else if (op == Sqrt) {
+                    out << "sqrt(" << to_var.at(v.inst.operand[0]) << ")";
+                } else {
+                    NGS_ASSERT(false);
                 }
             }
             out << ";\n";
@@ -301,12 +354,14 @@ namespace nagisa {
                 out << "buffer" << v.buf_idx << "["
                     << "get_global_id(0)"
                     << "] = " << to_var.at(v.idx) << ";\n";
+                v._last_sync_time = ctx->_time;
             }
         }
         kernel << "__kernel void main(";
         {
-            for (size_t i = 0; i < ctx->buffers.size(); i++) {
-                auto &buf = ctx->buffers[i];
+            for (auto &p : ctx->buffers) {
+                auto i = p.first;
+                auto &buf = p.second;
                 kernel << "__global " << type_to_str(buf->type) << " * buffer" << i;
                 if (i != ctx->buffers.size() - 1) {
                     kernel << ", ";
@@ -320,22 +375,35 @@ namespace nagisa {
     }
     void nagisa_run_kernel(size_t size, const std::string &kernel_src) {
         std::cout << "kernel:\n" << kernel_src << std::endl;
-        cl::Program::Sources sources;
-        sources.push_back({kernel_src.c_str(), kernel_src.length()});
-        cl::Program program(ocl_ctx->context, sources);
-        if (program.build({ocl_ctx->device}) != CL_SUCCESS) {
-            std::cerr << "Error building: " << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(ocl_ctx->device) << std::endl;
-            exit(1);
+        auto it = ctx->kernel_cache.find(kernel_src);
+        cl::Program *program = nullptr;
+        if (it != ctx->kernel_cache.end()) {
+            std::cout << "hit!" << std::endl;
+            program = &it->second;
+        } else {
+            cl::Program::Sources sources;
+            sources.push_back({kernel_src.c_str(), kernel_src.length()});
+            cl::Program p(ocl_ctx->context, sources);
+            if (p.build({ocl_ctx->device}) != CL_SUCCESS) {
+                std::cerr << "Error building: " << p.getBuildInfo<CL_PROGRAM_BUILD_LOG>(ocl_ctx->device) << std::endl;
+                exit(1);
+            }
+            ctx->kernel_cache.emplace(kernel_src, p);
+            program = &ctx->kernel_cache[kernel_src];
         }
-        cl::Kernel kernel(program, "main");
-        for (size_t i = 0; i < ctx->buffers.size(); i++) {
-            kernel.setArg((cl_uint)i, ctx->buffers[i]->get());
+
+        cl::Kernel kernel(*program, "main");
+        for (auto &p : ctx->buffers) {
+            kernel.setArg((cl_uint)p.first, p.second->get());
         }
         std::cout << "kernel launch with size: " << size << std::endl;
         ocl_ctx->queue.enqueueNDRangeKernel(kernel, cl::NDRange(0), cl::NDRange(size));
         ocl_ctx->queue.finish();
     }
+    void nagisa_free_var(int i);
     void nagisa_eval() {
+        if (ctx->live.empty())
+            return;
         std::map<size_t, std::pair<std::unordered_set<int>, std::vector<int>>> traces;
         for (auto idx : ctx->live) {
             auto &rec = traces[ctx->vars.at(idx).size];
@@ -347,6 +415,49 @@ namespace nagisa {
             auto &trace = it->second.second;
             auto knl = nagisa_generate_kernel_trace(to_var, trace);
             nagisa_run_kernel(ctx->cur_size, knl);
+        }
+        for (auto it = ctx->vars.begin(); it != ctx->vars.end();) {
+            if (it->first < (int)Predefined::Total) {
+                it++;
+                continue;
+            }
+
+            bool need_remove = false;
+            // if (it->second._last_sync_time == -1) {
+            //     // not synced to global memory
+            //     // is lost permanently after kernel launch
+            //     need_remove = true;
+            // }
+            if (it->second._ref_ext == 0) {
+                // no need keep the variable
+                need_remove = true;
+            }
+            if (need_remove) {
+                nagisa_free_var(it->first);
+                it = ctx->vars.erase(it);
+            } else {
+                it++;
+            }
+        }
+        decltype(ctx->buffers) new_buffers;
+        std::unordered_map<int, int> buffer_rename;
+        for (auto &p : ctx->buffers) {
+            buffer_rename[p.first] = (int)new_buffers.size();
+            new_buffers.emplace((int)new_buffers.size(), std::move(p.second));
+        }
+        for (auto &v : ctx->vars) {
+            if (v.second.buf_idx != -1) {
+                v.second.buf_idx = buffer_rename[v.second.buf_idx];
+            }
+        }
+        std::swap(ctx->buffers, new_buffers);
+        ctx->_time++;
+    }
+    void nagisa_free_var(int i) {
+        // std::cout << "free " << i << std::endl;
+        auto v = ctx->vars.at(i);
+        if (v.buf_idx != -1) {
+            ctx->buffers.erase(v.buf_idx);
         }
     }
     void nagisa_copy_to_host(int idx, void *p) {
